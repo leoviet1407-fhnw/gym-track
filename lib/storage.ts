@@ -1,4 +1,4 @@
-import { put, list, del } from "@vercel/blob";
+import { put, list } from "@vercel/blob";
 import type {
   Profile,
   ProfileId,
@@ -19,12 +19,19 @@ const JSON_OPTS = {
 };
 
 async function fetchJSON<T>(pathname: string): Promise<T | null> {
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
-  const hit = blobs.find((b) => b.pathname === pathname);
-  if (!hit) return null;
-  const res = await fetch(hit.url, { cache: "no-store" });
-  if (!res.ok) return null;
-  return (await res.json()) as T;
+  try {
+    const { blobs } = await list({ prefix: pathname, limit: 1 });
+    const hit = blobs.find((b) => b.pathname === pathname);
+    if (!hit) return null;
+    const res = await fetch(hit.url, {
+      headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
 }
 
 async function writeJSON(pathname: string, data: unknown) {
