@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { Profile } from "@/lib/types";
 import BottomNav, { Tab } from "./components/BottomNav";
 import ProfileTab from "./components/ProfileTab";
@@ -12,30 +12,45 @@ import CoachTab from "./components/CoachTab";
 type ProfileName = "viet" | "jullie";
 
 export default function Home() {
-  const [profileName, setProfileName] = useState<ProfileName>("viet");
+  const [profileName, setProfileName] = useState<ProfileName | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [tab, setTab] = useState<Tab>("workout");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fetchRef = useRef<number>(0);
 
+  // Step 1: read localStorage once on mount, set profileName
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? localStorage.getItem("gymtrack_profile") : null;
-    if (saved === "viet" || saved === "jullie") setProfileName(saved);
+    const saved = localStorage.getItem("gymtrack_profile");
+    const name: ProfileName = saved === "jullie" ? "jullie" : "viet";
+    setProfileName(name);
   }, []);
 
+  // Step 2: fetch profile whenever profileName is set/changed
   useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("gymtrack_profile", profileName);
-    loadProfile(profileName);
-  }, [profileName]);
+    if (!profileName) return;
+    localStorage.setItem("gymtrack_profile", profileName);
 
-  async function loadProfile(name: ProfileName) {
+    const id = ++fetchRef.current;
     setLoading(true);
-    try {
-      const r = await fetch(`/api/profile?id=${name}`);
-      setProfile(await r.json());
-    } finally {
-      setLoading(false);
-    }
-  }
+    setError(null);
+
+    fetch(`/api/profile?id=${profileName}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`API error ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (fetchRef.current !== id) return; // stale, ignore
+        setProfile(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (fetchRef.current !== id) return;
+        setError(err.message ?? "Failed to load profile");
+        setLoading(false);
+      });
+  }, [profileName]);
 
   const handleProfileUpdate = useCallback(async (p: Profile) => {
     setProfile(p);
@@ -45,6 +60,8 @@ export default function Home() {
       body: JSON.stringify(p),
     });
   }, []);
+
+  const isReady = !loading && profile !== null && profileName !== null;
 
   return (
     <div className="min-h-screen max-w-md mx-auto">
@@ -56,10 +73,13 @@ export default function Home() {
           </div>
           <div className="flex gap-1 bg-surface2 rounded-full p-1">
             {(["viet", "jullie"] as ProfileName[]).map((n) => (
-              <button key={n} onClick={() => setProfileName(n)}
+              <button
+                key={n}
+                onClick={() => setProfileName(n)}
                 className={`px-4 py-1.5 rounded-full text-xs font-bold capitalize transition-colors ${
                   profileName === n ? "bg-accent text-white" : "text-muted"
-                }`}>
+                }`}
+              >
                 {n === "viet" ? "Viet" : "Jullie"}
               </button>
             ))}
@@ -69,20 +89,44 @@ export default function Home() {
 
       {/* Tab content */}
       <main className="px-4 pb-28 pt-4">
-        {loading || !profile ? (
-          <div className="flex items-center justify-center py-20">
+        {loading || profileName === null ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
             <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            <div className="text-muted text-xs">Loading profile…</div>
           </div>
-        ) : (
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="text-4xl">⚠️</div>
+            <div className="text-text font-bold text-center">Could not load profile</div>
+            <div className="text-muted text-xs text-center max-w-xs">{error}</div>
+            <div className="text-muted text-xs text-center max-w-xs">
+              Make sure <code className="text-accent">BLOB_READ_WRITE_TOKEN</code> is set in your Vercel environment variables.
+            </div>
+            <button
+              onClick={() => setProfileName((p) => (p === "viet" ? "viet" : "jullie"))}
+              className="mt-2 px-5 py-3 bg-accent text-white rounded-xl font-bold text-sm active:scale-95"
+            >
+              Retry
+            </button>
+          </div>
+        ) : isReady ? (
           <>
-            {tab === "profile" && <ProfileTab profile={profile} onSave={handleProfileUpdate} />}
-            {tab === "workout" && <WorkoutTab profile={profile} onProfileUpdate={handleProfileUpdate} profileName={profileName} />}
-            {tab === "supplements" && <SupplementsTab profile={profile} onProfileUpdate={handleProfileUpdate} profileName={profileName} />}
-            {tab === "habits" && <HabitsTab profile={profile} onProfileUpdate={handleProfileUpdate} profileName={profileName} />}
+            {tab === "profile" && (
+              <ProfileTab profile={profile!} onSave={handleProfileUpdate} />
+            )}
+            {tab === "workout" && (
+              <WorkoutTab profile={profile!} onProfileUpdate={handleProfileUpdate} profileName={profileName!} />
+            )}
+            {tab === "supplements" && (
+              <SupplementsTab profile={profile!} onProfileUpdate={handleProfileUpdate} profileName={profileName!} />
+            )}
+            {tab === "habits" && (
+              <HabitsTab profile={profile!} onProfileUpdate={handleProfileUpdate} profileName={profileName!} />
+            )}
             {tab === "compete" && <CompeteTab />}
-            {tab === "coach" && <CoachTab profileName={profileName} />}
+            {tab === "coach" && <CoachTab profileName={profileName!} />}
           </>
-        )}
+        ) : null}
       </main>
 
       <BottomNav active={tab} onChange={setTab} />
