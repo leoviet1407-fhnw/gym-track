@@ -278,6 +278,14 @@ export default function WorkoutTab({
     targetWeightKg: "", targetRepsMin: "8", targetRepsMax: "12", template: "",
   });
   const [newCardio, setNewCardio] = useState({ name: "" });
+  const [editTemplateModal, setEditTemplateModal] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
+  const [editTemplateName, setEditTemplateName] = useState("");
+  const [editExModal, setEditExModal] = useState(false);
+  const [editingEx, setEditingEx] = useState<Exercise | null>(null);
+  const [editEx, setEditEx] = useState({ name: "", muscleGroup: "", bodyPart: "upper" as "upper"|"lower", targetWeightKg: "", targetRepsMin: "8", targetRepsMax: "12", template: "" });
+  const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState<string | null>(null);
+  const [confirmDeleteEx, setConfirmDeleteEx] = useState<string | null>(null);
   const today = todayISO();
 
   const templates = Array.from(new Set(
@@ -348,6 +356,44 @@ export default function WorkoutTab({
 
   async function removeExercise(id: string) {
     await onProfileUpdate({ ...profile, exerciseLibrary: profile.exerciseLibrary.filter((e) => e.id !== id) });
+    setConfirmDeleteEx(null);
+  }
+
+  async function renameTemplate(oldName: string, newName: string) {
+    if (!newName.trim() || newName === oldName) { setEditTemplateModal(false); return; }
+    const updated = profile.exerciseLibrary.map((e) =>
+      e.template === oldName ? { ...e, template: newName } : e
+    );
+    await onProfileUpdate({ ...profile, exerciseLibrary: updated });
+    if (activeTemplate === oldName) setActiveTemplate(newName);
+    setEditTemplateModal(false);
+    setEditingTemplate(null);
+  }
+
+  async function deleteTemplate(name: string) {
+    const updated = profile.exerciseLibrary.filter((e) => e.template !== name);
+    await onProfileUpdate({ ...profile, exerciseLibrary: updated });
+    if (activeTemplate === name) setActiveTemplate(null);
+    setConfirmDeleteTemplate(null);
+  }
+
+  async function saveEditExercise() {
+    if (!editingEx || !editEx.name.trim() || !editEx.template.trim()) return;
+    const updated = profile.exerciseLibrary.map((e) =>
+      e.id === editingEx.id ? {
+        ...e,
+        name: editEx.name.trim(),
+        muscleGroup: editEx.muscleGroup,
+        bodyPart: editEx.bodyPart as "upper"|"lower",
+        targetWeightKg: parseFloat(editEx.targetWeightKg) || 0,
+        targetRepsMin: parseInt(editEx.targetRepsMin) || 8,
+        targetRepsMax: parseInt(editEx.targetRepsMax) || 12,
+        template: editEx.template.trim(),
+      } : e
+    );
+    await onProfileUpdate({ ...profile, exerciseLibrary: updated });
+    setEditExModal(false);
+    setEditingEx(null);
   }
 
   return (
@@ -366,15 +412,21 @@ export default function WorkoutTab({
           <div className="font-bold text-sm mb-3">Templates</div>
           <div className="flex flex-col gap-2">
             {templates.map((t) => (
-              <button key={t} onClick={() => setActiveTemplate(activeTemplate === t ? null : t)}
-                className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm transition-all ${
-                  activeTemplate === t ? "bg-accent text-white" : "bg-surface2 text-text border border-border"
-                }`}>
-                {t}
-                <span className="text-xs font-normal ml-2 opacity-70">
-                  ({profile.exerciseLibrary.filter((e) => e.template === t).length} exercises)
-                </span>
-              </button>
+              <div key={t} className="flex items-center gap-2">
+                <button onClick={() => setActiveTemplate(activeTemplate === t ? null : t)}
+                  className={`flex-1 text-left px-4 py-3 rounded-xl font-bold text-sm transition-all ${
+                    activeTemplate === t ? "bg-accent text-white" : "bg-surface2 text-text border border-border"
+                  }`}>
+                  {t}
+                  <span className="text-xs font-normal ml-2 opacity-70">
+                    ({profile.exerciseLibrary.filter((e) => e.template === t).length} exercises)
+                  </span>
+                </button>
+                <button onClick={() => { setEditingTemplate(t); setEditTemplateName(t); setEditTemplateModal(true); }}
+                  className="text-muted text-xs bg-surface2 border border-border px-2 py-2 rounded-lg">✏️</button>
+                <button onClick={() => setConfirmDeleteTemplate(t)}
+                  className="text-accent text-xs bg-surface2 border border-border px-2 py-2 rounded-lg">🗑️</button>
+              </div>
             ))}
           </div>
         </Card>
@@ -406,7 +458,9 @@ export default function WorkoutTab({
                       className="text-accent text-xs font-bold bg-accent/10 px-3 py-1.5 rounded-lg">
                       {expandedEx === ex.id ? "Close" : "Log"}
                     </button>
-                    <button onClick={() => removeExercise(ex.id)} className="text-muted text-lg px-1">×</button>
+                    <button onClick={() => { setEditingEx(ex); setEditEx({ name: ex.name, muscleGroup: ex.muscleGroup||"", bodyPart: ex.bodyPart||"upper", targetWeightKg: String(ex.targetWeightKg||""), targetRepsMin: String(ex.targetRepsMin||8), targetRepsMax: String(ex.targetRepsMax||12), template: ex.template||"" }); setEditExModal(true); }}
+                      className="text-muted text-xs bg-surface2 border border-border px-2 py-1.5 rounded-lg">✏️</button>
+                    <button onClick={() => setConfirmDeleteEx(ex.id)} className="text-muted text-xs bg-surface2 border border-border px-2 py-1.5 rounded-lg">🗑️</button>
                   </div>
                 </div>
                 {expandedEx === ex.id && (
@@ -530,6 +584,68 @@ export default function WorkoutTab({
         <Btn size="lg" className="mt-4" onClick={addCardioExercise} disabled={!newCardio.name.trim()}>
           Add Cardio
         </Btn>
+      </Modal>
+
+      {/* Edit template modal */}
+      <Modal open={editTemplateModal} onClose={() => setEditTemplateModal(false)} title="Rename Template">
+        <Input label="Template name" value={editTemplateName} onChange={setEditTemplateName} placeholder="e.g. Push Day" />
+        <Btn size="lg" className="mt-4" onClick={() => renameTemplate(editingTemplate!, editTemplateName)}
+          disabled={!editTemplateName.trim()}>Save</Btn>
+      </Modal>
+
+      {/* Delete template confirm */}
+      <Modal open={!!confirmDeleteTemplate} onClose={() => setConfirmDeleteTemplate(null)} title="Delete Template">
+        <div className="text-sm text-muted mb-4">
+          Delete <span className="text-text font-bold">"{confirmDeleteTemplate}"</span> and all its exercises? This cannot be undone.
+        </div>
+        <div className="flex gap-3">
+          <Btn variant="secondary" onClick={() => setConfirmDeleteTemplate(null)} className="flex-1">Cancel</Btn>
+          <Btn variant="danger" onClick={() => deleteTemplate(confirmDeleteTemplate!)} className="flex-1">Delete</Btn>
+        </div>
+      </Modal>
+
+      {/* Edit exercise modal */}
+      <Modal open={editExModal} onClose={() => setEditExModal(false)} title="Edit Exercise">
+        <div className="flex flex-col gap-3">
+          <Input label="Exercise name" value={editEx.name} onChange={(v) => setEditEx({ ...editEx, name: v })} />
+          <Input label="Muscle group" value={editEx.muscleGroup} onChange={(v) => setEditEx({ ...editEx, muscleGroup: v })} />
+          <Select label="Body part" value={editEx.bodyPart}
+            onChange={(v) => setEditEx({ ...editEx, bodyPart: v as "upper"|"lower" })}
+            options={[{ value: "upper", label: "Upper body (+2.5kg)" }, { value: "lower", label: "Lower body (+5kg)" }]} />
+          <Input label="Target weight" type="number" value={editEx.targetWeightKg}
+            onChange={(v) => setEditEx({ ...editEx, targetWeightKg: v })} suffix="kg" step={0.5} min={0} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Min reps" type="number" value={editEx.targetRepsMin}
+              onChange={(v) => setEditEx({ ...editEx, targetRepsMin: v })} min={1} max={30} />
+            <Input label="Max reps" type="number" value={editEx.targetRepsMax}
+              onChange={(v) => setEditEx({ ...editEx, targetRepsMax: v })} min={1} max={50} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted font-semibold uppercase tracking-wider">Template <span className="text-accent">*</span></label>
+            <div className="flex flex-wrap gap-2 mb-1">
+              {templates.map((t) => (
+                <button key={t} type="button" onClick={() => setEditEx({ ...editEx, template: t })}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${editEx.template === t ? "bg-accent text-white" : "bg-surface2 text-muted border border-border"}`}>
+                  {t}
+                </button>
+              ))}
+            </div>
+            <input value={templates.includes(editEx.template) ? "" : editEx.template}
+              onChange={(e) => setEditEx({ ...editEx, template: e.target.value })}
+              placeholder="Or type a new template name…"
+              className="w-full bg-surface2 border border-border rounded-xl px-4 py-3 text-text text-sm focus:outline-none focus:border-accent" />
+          </div>
+          <Btn size="lg" onClick={saveEditExercise} disabled={!editEx.name.trim() || !editEx.template.trim()}>Save Changes</Btn>
+        </div>
+      </Modal>
+
+      {/* Delete exercise confirm */}
+      <Modal open={!!confirmDeleteEx} onClose={() => setConfirmDeleteEx(null)} title="Delete Exercise">
+        <div className="text-sm text-muted mb-4">Delete this exercise? This cannot be undone.</div>
+        <div className="flex gap-3">
+          <Btn variant="secondary" onClick={() => setConfirmDeleteEx(null)} className="flex-1">Cancel</Btn>
+          <Btn variant="danger" onClick={() => removeExercise(confirmDeleteEx!)} className="flex-1">Delete</Btn>
+        </div>
       </Modal>
     </div>
   );
