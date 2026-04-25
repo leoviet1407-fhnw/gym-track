@@ -1,12 +1,195 @@
 "use client";
-import { useState, useEffect } from "react";
-import type { Profile } from "@/lib/types";
+import { useState, useEffect, useCallback } from "react";
+import type { Profile, DailyRecord, PR } from "@/lib/types";
 import { bmi, bmiCategory, bmrCalories } from "@/lib/fitness";
 import { formatDate, formatShort, todayISO } from "@/lib/date";
-import { Card, Card2, Btn, Input, Select, SectionTitle, Divider, Spinner } from "./UI";
+import { oneRepMax } from "@/lib/fitness";
+import { Card, Card2, Btn, Input, Select, SectionTitle, Divider, Spinner, Modal } from "./UI";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
-type ProfileName = "viet" | "jullie";
+type Tab = "stats" | "history" | "prs";
+
+function HistoryByDate({ profileId, exercises }: { profileId: string; exercises: Profile["exerciseLibrary"] }) {
+  const [dates, setDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [record, setRecord] = useState<DailyRecord | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/history?id=${profileId}&mode=dates`)
+      .then((r) => r.json())
+      .then((d) => { setDates(d.dates ?? []); setLoading(false); });
+  }, [profileId]);
+
+  async function selectDate(date: string) {
+    if (selectedDate === date) { setSelectedDate(null); setRecord(null); return; }
+    setSelectedDate(date);
+    const rec = await fetch(`/api/history?id=${profileId}&mode=date&date=${date}`).then((r) => r.json());
+    setRecord(rec);
+  }
+
+  if (loading) return <Spinner />;
+  if (!dates.length) return <div className="text-muted text-sm text-center py-6">No workout history yet</div>;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {dates.map((d) => (
+        <div key={d}>
+          <button onClick={() => selectDate(d)}
+            className={`w-full text-left px-4 py-3 rounded-xl font-semibold text-sm transition-all flex justify-between items-center ${
+              selectedDate === d ? "bg-accent text-white" : "bg-surface2 text-text border border-border"
+            }`}>
+            <span>{formatDate(d)}</span>
+            <span className="text-xs opacity-70">{selectedDate === d ? "▲" : "▼"}</span>
+          </button>
+          {selectedDate === d && record && (
+            <div className="mt-1 flex flex-col gap-1 pl-2">
+              {record.workouts.length === 0 ? (
+                <div className="text-muted text-xs px-3 py-2">No workouts logged</div>
+              ) : record.workouts.map((w, i) => (
+                <div key={i} className="bg-surface rounded-xl px-3 py-2">
+                  <div className="font-bold text-sm">{w.exerciseName}</div>
+                  {w.type === "strength" && w.sets?.length ? (
+                    <div className="text-xs text-muted mt-1 flex flex-wrap gap-1">
+                      {w.sets.map((s, j) => (
+                        <span key={j} className="bg-surface2 px-2 py-0.5 rounded-full">
+                          {s.reps}×{s.weightKg}kg
+                        </span>
+                      ))}
+                      <span className="text-accent2 px-2 py-0.5">
+                        1RM≈{Math.max(...w.sets.map((s) => oneRepMax(s.weightKg, s.reps)))}kg
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted mt-1">
+                      {w.durationMin ? `${w.durationMin} min` : ""}
+                      {w.distanceKm ? ` · ${w.distanceKm} km` : ""}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HistoryByExercise({ profileId, exercises }: { profileId: string; exercises: Profile["exerciseLibrary"] }) {
+  const [selectedEx, setSelectedEx] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Array<{ date: string; sets: Array<{ reps: number; weightKg: number }>; oneRM: number }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  const strengthExercises = exercises.filter((e) => e.type === "strength");
+
+  async function selectExercise(id: string) {
+    if (selectedEx === id) { setSelectedEx(null); setSessions([]); return; }
+    setSelectedEx(id);
+    setLoading(true);
+    const data = await fetch(`/api/history?id=${profileId}&mode=exercise&exerciseId=${id}`).then((r) => r.json());
+    setSessions(data.sessions ?? []);
+    setLoading(false);
+  }
+
+  if (!strengthExercises.length) return <div className="text-muted text-sm text-center py-6">No exercises yet</div>;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {strengthExercises.map((ex) => (
+        <div key={ex.id}>
+          <button onClick={() => selectExercise(ex.id)}
+            className={`w-full text-left px-4 py-3 rounded-xl font-semibold text-sm transition-all flex justify-between items-center ${
+              selectedEx === ex.id ? "bg-accent text-white" : "bg-surface2 text-text border border-border"
+            }`}>
+            <span>{ex.name}</span>
+            <span className="text-xs opacity-70">{selectedEx === ex.id ? "▲" : "▼"}</span>
+          </button>
+          {selectedEx === ex.id && (
+            <div className="mt-1 pl-2">
+              {loading ? <Spinner /> : sessions.length === 0 ? (
+                <div className="text-muted text-xs px-3 py-2">No sessions logged yet</div>
+              ) : (
+                <>
+                  {/* 1RM trend chart */}
+                  {sessions.length > 1 && (
+                    <div className="bg-surface rounded-xl p-3 mb-2">
+                      <div className="text-xs text-muted mb-2">Estimated 1RM trend</div>
+                      <ResponsiveContainer width="100%" height={100}>
+                        <LineChart data={[...sessions].reverse().map((s) => ({ label: formatShort(s.date), rm: s.oneRM }))}>
+                          <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#8a8a92" }} interval="preserveStartEnd" />
+                          <YAxis domain={["auto", "auto"]} tick={{ fontSize: 9, fill: "#8a8a92" }} width={28} />
+                          <Tooltip contentStyle={{ background: "#141417", border: "1px solid #2a2a2f", borderRadius: 8, fontSize: 11 }}
+                            itemStyle={{ color: "#ffd84d" }} />
+                          <Line type="monotone" dataKey="rm" stroke="#ffd84d" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                  {/* Session list */}
+                  <div className="flex flex-col gap-1">
+                    {sessions.map((s, i) => (
+                      <div key={i} className="bg-surface rounded-xl px-3 py-2 flex justify-between items-start">
+                        <div>
+                          <div className="text-xs text-muted">{formatDate(s.date)}</div>
+                          <div className="text-xs text-text mt-0.5 flex flex-wrap gap-1">
+                            {s.sets.map((set, j) => (
+                              <span key={j} className="bg-surface2 px-2 py-0.5 rounded-full">
+                                {set.reps}×{set.weightKg}kg
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-accent2 text-xs font-bold">1RM≈{s.oneRM}kg</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PRHistory({ profileId }: { profileId: string }) {
+  const [prs, setPRs] = useState<PR[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/history?id=${profileId}&mode=prs`)
+      .then((r) => r.json())
+      .then((d) => { setPRs(d.prs ?? []); setLoading(false); });
+  }, [profileId]);
+
+  if (loading) return <Spinner />;
+  if (!prs.length) return <div className="text-muted text-sm text-center py-6">No PRs yet — keep logging!</div>;
+
+  const typeLabel = (t: string) => t === "weight" ? "Max Weight" : t === "reps" ? "Max Reps" : "Best 1RM";
+  const typeIcon = (t: string) => t === "weight" ? "🏋️" : t === "reps" ? "🔢" : "⚡";
+
+  return (
+    <div className="flex flex-col gap-2">
+      {prs.map((pr, i) => (
+        <div key={i} className="bg-surface2 rounded-xl px-4 py-3 flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span>{typeIcon(pr.type)}</span>
+              <span className="font-bold text-sm">{pr.exerciseName}</span>
+            </div>
+            <div className="text-xs text-muted">{typeLabel(pr.type)} · {formatDate(pr.date)}</div>
+          </div>
+          <div className="text-right">
+            <div className="font-display font-black text-accent text-lg">{pr.value}{pr.type === "reps" ? "" : "kg"}</div>
+            <div className="text-xs text-muted">was {pr.previousValue}{pr.type === "reps" ? "" : "kg"}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function ProfileTab({ profile, onSave }: { profile: Profile; onSave: (p: Profile) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
@@ -15,6 +198,7 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
   const [weights, setWeights] = useState<Array<{ date: string; weightKg: number }>>([]);
   const [newWeight, setNewWeight] = useState("");
   const [loadingWeights, setLoadingWeights] = useState(true);
+  const [historyTab, setHistoryTab] = useState<"date" | "exercise">("date");
 
   useEffect(() => { setForm(profile); }, [profile]);
 
@@ -91,7 +275,8 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
         {editing ? (
           <div className="flex flex-col gap-3">
             <Input label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-            <Select label="Sex" value={form.sex} onChange={(v) => setForm({ ...form, sex: v as "male" | "female" })}
+            <Select label="Sex" value={form.sex}
+              onChange={(v) => setForm({ ...form, sex: v as "male" | "female" })}
               options={[{ value: "male", label: "Male" }, { value: "female", label: "Female" }]} />
             <Input label="Age" type="number" value={form.age} min={10} max={100}
               onChange={(v) => setForm({ ...form, age: parseInt(v) || 0 })} suffix="yrs" />
@@ -101,7 +286,7 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
               onChange={(v) => setForm({ ...form, weightKg: parseFloat(v) || 0 })} suffix="kg" />
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-y-3 text-sm">
             {[
               ["Name", form.name],
               ["Sex", form.sex],
@@ -138,18 +323,46 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="text-muted text-xs text-center py-6">Log at least 2 entries to see your trend</div>
+          <div className="text-muted text-xs text-center py-4">Log at least 2 entries to see your trend</div>
         )}
         {weights.length > 0 && (
-          <div className="mt-3 flex flex-col gap-1 max-h-40 overflow-y-auto no-scrollbar">
-            {[...weights].reverse().slice(0, 20).map((w) => (
-              <div key={w.date} className="flex justify-between text-xs text-muted px-1">
-                <span>{formatDate(w.date)}</span>
+          <div className="mt-3 flex flex-col gap-1 max-h-32 overflow-y-auto no-scrollbar">
+            {[...weights].reverse().slice(0, 10).map((w) => (
+              <div key={w.date} className="flex justify-between text-xs px-1">
+                <span className="text-muted">{formatDate(w.date)}</span>
                 <span className="font-bold text-text">{w.weightKg} kg</span>
               </div>
             ))}
           </div>
         )}
+      </Card>
+
+      {/* History */}
+      <Card>
+        <div className="font-bold text-sm mb-3">Workout History</div>
+        {/* Sub-tabs */}
+        <div className="flex gap-1 bg-surface2 rounded-xl p-1 mb-4">
+          {(["date", "exercise"] as const).map((t) => (
+            <button key={t} onClick={() => setHistoryTab(t)}
+              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors capitalize ${
+                historyTab === t ? "bg-accent text-white" : "text-muted"
+              }`}>
+              By {t}
+            </button>
+          ))}
+        </div>
+        {historyTab === "date" && (
+          <HistoryByDate profileId={profile.id} exercises={profile.exerciseLibrary} />
+        )}
+        {historyTab === "exercise" && (
+          <HistoryByExercise profileId={profile.id} exercises={profile.exerciseLibrary} />
+        )}
+      </Card>
+
+      {/* PRs */}
+      <Card>
+        <div className="font-bold text-sm mb-3">Personal Records 🏆</div>
+        <PRHistory profileId={profile.id} />
       </Card>
     </div>
   );

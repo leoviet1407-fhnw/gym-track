@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import type { Profile, Exercise, WorkoutEntry, LoggedSet } from "@/lib/types";
+import type { Profile, Exercise, WorkoutEntry, LoggedSet, DailyRecord } from "@/lib/types";
+import { getRepsMin, getRepsMax } from "@/lib/types";
 import { todayISO, formatDate, formatShort } from "@/lib/date";
 import { oneRepMax } from "@/lib/fitness";
 import { Card, Card2, Btn, Input, Select, SectionTitle, Modal, Spinner, Divider } from "./UI";
@@ -9,8 +10,15 @@ import RestTimer from "./RestTimer";
 type ProfileName = "viet" | "jullie";
 
 interface PRResult { type: string; exerciseName: string; value: number; previousValue: number }
-interface AutoResult { prs: PRResult[]; weightSuggest: number | null; deload: number | null }
+interface ProgressionResult {
+  type: "increase" | "tooHeavy";
+  newWeight?: number;
+  resetRepsTo?: number;
+  suggestedWeight?: number;
+}
+interface AutoResult { prs: PRResult[]; progression: ProgressionResult | null; deload: number | null }
 
+// ── Exercise history (last 3 sessions) ──────────────────────────────────────
 function ExerciseHistory({ exerciseId, profileId }: { exerciseId: string; profileId: string }) {
   const [history, setHistory] = useState<Array<{ date: string; entry: WorkoutEntry }>>([]);
   useEffect(() => {
@@ -18,17 +26,18 @@ function ExerciseHistory({ exerciseId, profileId }: { exerciseId: string; profil
       .then((r) => r.json())
       .then((d) => setHistory(d.history ?? []));
   }, [exerciseId, profileId]);
-  if (!history.length) return <div className="text-xs text-muted py-2">No history yet</div>;
+  if (!history.length) return <div className="text-xs text-muted py-2">No previous sessions</div>;
   return (
     <div className="flex flex-col gap-1 mt-2">
+      <div className="text-xs text-muted font-semibold uppercase tracking-wide mb-1">Last sessions</div>
       {history.slice(0, 3).map((h, i) => {
         const sets = h.entry.sets ?? [];
         const maxRM = sets.length ? Math.max(...sets.map((s) => oneRepMax(s.weightKg, s.reps))) : 0;
         return (
-          <div key={i} className="flex justify-between text-xs text-muted">
-            <span>{formatDate(h.date)}</span>
-            <span>{sets.map((s) => `${s.reps}×${s.weightKg}kg`).join(", ")}</span>
-            {maxRM > 0 && <span className="text-accent2">1RM≈{maxRM}kg</span>}
+          <div key={i} className="flex justify-between text-xs bg-surface rounded-lg px-2 py-1.5 gap-2">
+            <span className="text-muted shrink-0">{formatDate(h.date)}</span>
+            <span className="text-text">{sets.map((s) => `${s.reps}×${s.weightKg}kg`).join(", ")}</span>
+            {maxRM > 0 && <span className="text-accent2 shrink-0">1RM≈{maxRM}kg</span>}
           </div>
         );
       })}
@@ -36,9 +45,23 @@ function ExerciseHistory({ exerciseId, profileId }: { exerciseId: string; profil
   );
 }
 
-function SetLogger({ exercise, onLog }: { exercise: Exercise; onLog: (sets: LoggedSet[]) => Promise<AutoResult> }) {
+// ── Set logger with double progression cards ────────────────────────────────
+function SetLogger({
+  exercise, profileId, onLog, onLogged,
+}: {
+  exercise: Exercise;
+  profileId: string;
+  onLog: (sets: LoggedSet[]) => Promise<AutoResult>;
+  onLogged: () => void;
+}) {
+  const repsMin = getRepsMin(exercise);
+  const repsMax = getRepsMax(exercise);
+
   const [sets, setSets] = useState<LoggedSet[]>(
-    Array.from({ length: 3 }, () => ({ reps: exercise.targetReps ?? 8, weightKg: exercise.targetWeightKg ?? 0 }))
+    Array.from({ length: 3 }, () => ({
+      reps: repsMin,
+      weightKg: exercise.targetWeightKg ?? 0,
+    }))
   );
   const [logging, setLogging] = useState(false);
   const [result, setResult] = useState<AutoResult | null>(null);
@@ -47,18 +70,23 @@ function SetLogger({ exercise, onLog }: { exercise: Exercise; onLog: (sets: Logg
   function updateSet(i: number, field: "reps" | "weightKg", val: string) {
     setSets((prev) => prev.map((s, idx) => idx === i ? { ...s, [field]: parseFloat(val) || 0 } : s));
   }
-  function addSet() { setSets((prev) => [...prev, { reps: exercise.targetReps ?? 8, weightKg: exercise.targetWeightKg ?? 0 }]); }
-  function removeSet(i: number) { setSets((prev) => prev.filter((_, idx) => idx !== i)); }
+  function addSet() {
+    setSets((prev) => [...prev, { reps: repsMin, weightKg: exercise.targetWeightKg ?? 0 }]);
+  }
+  function removeSet(i: number) {
+    setSets((prev) => prev.filter((_, idx) => idx !== i));
+  }
 
   async function handleLog() {
     setLogging(true);
     const res = await onLog(sets);
     setResult(res);
     setLogging(false);
+    onLogged();
   }
 
-  async function acceptWeightIncrease(newWeight: number) {
-    await fetch(`/api/workout?id=${exercise.id}`, {
+  async function acceptIncrease(newWeight: number) {
+    await fetch(`/api/workout?id=${profileId}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ acceptWeightIncrease: { exerciseId: exercise.id, newWeight } }),
@@ -68,6 +96,13 @@ function SetLogger({ exercise, onLog }: { exercise: Exercise; onLog: (sets: Logg
 
   return (
     <div className="mt-3">
+      {/* Rep range hint */}
+      <div className="text-xs text-muted mb-2">
+        Target: <span className="text-text font-bold">{exercise.targetWeightKg}kg</span> ·
+        Rep range: <span className="text-text font-bold">{repsMin}–{repsMax}</span>
+      </div>
+
+      {/* Set grid */}
       <div className="grid grid-cols-12 gap-1 mb-1 text-xs text-muted px-1">
         <div className="col-span-1">#</div>
         <div className="col-span-5">Weight (kg)</div>
@@ -77,15 +112,22 @@ function SetLogger({ exercise, onLog }: { exercise: Exercise; onLog: (sets: Logg
       {sets.map((s, i) => (
         <div key={i} className="grid grid-cols-12 gap-1 mb-2 items-center">
           <div className="col-span-1 text-xs text-muted text-center">{i + 1}</div>
-          <input type="number" value={s.weightKg} onChange={(e) => updateSet(i, "weightKg", e.target.value)}
+          <input type="number" value={s.weightKg}
+            onChange={(e) => updateSet(i, "weightKg", e.target.value)}
             step="0.5" min="0"
             className="col-span-5 bg-surface2 border border-border rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-accent" />
-          <input type="number" value={s.reps} onChange={(e) => updateSet(i, "reps", e.target.value)}
+          <input type="number" value={s.reps}
+            onChange={(e) => updateSet(i, "reps", e.target.value)}
             min="1" max="100"
-            className="col-span-5 bg-surface2 border border-border rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-accent" />
+            className={`col-span-5 bg-surface2 border rounded-lg px-2 py-2 text-sm text-center focus:outline-none transition-colors ${
+              s.reps >= repsMax ? "border-success focus:border-success" :
+              s.reps < repsMin ? "border-accent focus:border-accent" :
+              "border-border focus:border-accent"
+            }`} />
           <button onClick={() => removeSet(i)} className="col-span-1 text-muted text-sm">×</button>
         </div>
       ))}
+
       <div className="flex gap-2 mt-2">
         <Btn size="sm" variant="secondary" onClick={addSet}>+ Set</Btn>
         <Btn size="sm" onClick={handleLog} disabled={logging} className="flex-1">
@@ -93,26 +135,58 @@ function SetLogger({ exercise, onLog }: { exercise: Exercise; onLog: (sets: Logg
         </Btn>
       </div>
 
-      {/* Automation results */}
+      {/* Automation result cards */}
       {result && (
         <div className="mt-3 flex flex-col gap-2">
+          {/* PRs */}
           {result.prs.map((pr, i) => (
             <div key={i} className="bg-accent2/10 border border-accent2/40 rounded-xl p-3 pr-pop">
-              <div className="font-bold text-accent2 text-sm">🏆 New PR! {pr.type === "weight" ? "Heaviest weight" : pr.type === "reps" ? "Most reps" : "Best 1RM"}</div>
-              <div className="text-xs text-muted mt-0.5">{pr.value} (was {pr.previousValue})</div>
+              <div className="font-bold text-accent2 text-sm">
+                🏆 New PR! {pr.type === "weight" ? "Heaviest weight" : pr.type === "reps" ? "Most reps" : "Best 1RM"}
+              </div>
+              <div className="text-xs text-muted mt-0.5">{pr.value}{pr.type === "reps" ? " reps" : "kg"} (was {pr.previousValue}{pr.type === "reps" ? " reps" : "kg"})</div>
             </div>
           ))}
-          {result.weightSuggest && !accepted && (
+
+          {/* Double progression: increase */}
+          {result.progression?.type === "increase" && !accepted && (
             <div className="bg-success/10 border border-success/40 rounded-xl p-3">
-              <div className="font-bold text-success text-sm">📈 Time to increase weight!</div>
-              <div className="text-xs text-muted mt-0.5 mb-2">You've hit your target twice in a row. Suggested: {result.weightSuggest}kg</div>
-              <Btn size="sm" onClick={() => acceptWeightIncrease(result.weightSuggest!)}>Accept → {result.weightSuggest}kg</Btn>
+              <div className="font-bold text-success text-sm">📈 Double progression complete!</div>
+              <div className="text-xs text-muted mt-1 mb-2">
+                You hit {repsMax} reps twice in a row at {exercise.targetWeightKg}kg.
+                Increase to <span className="text-text font-bold">{result.progression.newWeight}kg</span> and
+                reset back to <span className="text-text font-bold">{result.progression.resetRepsTo} reps</span>.
+              </div>
+              <Btn size="sm" onClick={() => acceptIncrease(result.progression!.newWeight!)}>
+                Accept → {result.progression.newWeight}kg
+              </Btn>
             </div>
           )}
+          {accepted && (
+            <div className="bg-success/10 border border-success/40 rounded-xl p-3">
+              <div className="font-bold text-success text-sm">✅ Weight updated!</div>
+            </div>
+          )}
+
+          {/* Double progression: too heavy */}
+          {result.progression?.type === "tooHeavy" && (
+            <div className="bg-accent/10 border border-accent/40 rounded-xl p-3">
+              <div className="font-bold text-accent text-sm">⚠️ Weight too heavy</div>
+              <div className="text-xs text-muted mt-1">
+                You dropped below {repsMin} reps. Consider dropping back
+                to <span className="text-text font-bold">{result.progression.suggestedWeight}kg</span> to
+                stay in your rep range and progress properly.
+              </div>
+            </div>
+          )}
+
+          {/* Deload */}
           {result.deload && (
             <div className="bg-accent2/10 border border-accent2/30 rounded-xl p-3">
               <div className="font-bold text-accent2 text-sm">⚠️ Consider a deload week</div>
-              <div className="text-xs text-muted mt-0.5">You've been progressing for 4+ weeks. Drop to ~{result.deload}kg for one week to recover.</div>
+              <div className="text-xs text-muted mt-1">
+                4+ weeks of progression. Drop to ~{result.deload}kg for one week to recover.
+              </div>
             </div>
           )}
         </div>
@@ -121,7 +195,12 @@ function SetLogger({ exercise, onLog }: { exercise: Exercise; onLog: (sets: Logg
   );
 }
 
-function CardioLogger({ exercise, onLog }: { exercise: Exercise; onLog: (dur: number, dist: number) => Promise<void> }) {
+// ── Cardio logger ────────────────────────────────────────────────────────────
+function CardioLogger({ exercise, onLog, onLogged }: {
+  exercise: Exercise;
+  onLog: (dur: number, dist: number) => Promise<void>;
+  onLogged: () => void;
+}) {
   const [duration, setDuration] = useState("");
   const [distance, setDistance] = useState("");
   const [logging, setLogging] = useState(false);
@@ -130,6 +209,7 @@ function CardioLogger({ exercise, onLog }: { exercise: Exercise; onLog: (dur: nu
     await onLog(parseFloat(duration) || 0, parseFloat(distance) || 0);
     setLogging(false);
     setDuration(""); setDistance("");
+    onLogged();
   }
   return (
     <div className="mt-3 flex flex-col gap-2">
@@ -144,6 +224,43 @@ function CardioLogger({ exercise, onLog }: { exercise: Exercise; onLog: (dur: nu
   );
 }
 
+// ── Today's log ──────────────────────────────────────────────────────────────
+function TodayLog({ workouts }: { workouts: WorkoutEntry[] }) {
+  if (!workouts.length) return null;
+  return (
+    <Card className="border border-success/30 bg-success/5">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-success text-lg">✓</span>
+        <div className="font-bold text-sm text-success">Today's Log</div>
+        <div className="text-xs text-muted ml-auto">{workouts.length} exercise{workouts.length > 1 ? "s" : ""}</div>
+      </div>
+      <div className="flex flex-col gap-2">
+        {workouts.map((w, i) => (
+          <div key={i} className="bg-surface2 rounded-xl px-3 py-2">
+            <div className="font-semibold text-sm">{w.exerciseName}</div>
+            {w.type === "strength" && w.sets?.length ? (
+              <div className="text-xs text-muted mt-1 flex flex-wrap gap-1">
+                {w.sets.map((s, j) => (
+                  <span key={j} className="bg-surface px-2 py-0.5 rounded-full">{s.reps}×{s.weightKg}kg</span>
+                ))}
+                <span className="text-accent2 px-1">
+                  1RM≈{Math.max(...w.sets.map((s) => oneRepMax(s.weightKg, s.reps)))}kg
+                </span>
+              </div>
+            ) : (
+              <div className="text-xs text-muted mt-1">
+                {w.durationMin ? `${w.durationMin} min` : ""}
+                {w.distanceKm ? ` · ${w.distanceKm} km` : ""}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+// ── Main WorkoutTab ──────────────────────────────────────────────────────────
 export default function WorkoutTab({
   profile, onProfileUpdate, profileName,
 }: {
@@ -155,23 +272,33 @@ export default function WorkoutTab({
   const [expandedEx, setExpandedEx] = useState<string | null>(null);
   const [addExModal, setAddExModal] = useState(false);
   const [addCardioModal, setAddCardioModal] = useState(false);
-  const [newEx, setNewEx] = useState({ name: "", muscleGroup: "", bodyPart: "upper" as "upper"|"lower", targetWeightKg: "", targetReps: "8", template: "" });
+  const [todayWorkouts, setTodayWorkouts] = useState<WorkoutEntry[]>([]);
+  const [newEx, setNewEx] = useState({
+    name: "", muscleGroup: "", bodyPart: "upper" as "upper" | "lower",
+    targetWeightKg: "", targetRepsMin: "8", targetRepsMax: "12", template: "",
+  });
   const [newCardio, setNewCardio] = useState({ name: "" });
   const today = todayISO();
 
-  const templates = Array.from(new Set(profile.exerciseLibrary.filter((e) => e.template).map((e) => e.template!)));
+  const templates = Array.from(new Set(
+    profile.exerciseLibrary.filter((e) => e.template).map((e) => e.template!)
+  ));
   const cardioExercises = profile.exerciseLibrary.filter((e) => e.type === "cardio");
   const templateExercises = activeTemplate
     ? profile.exerciseLibrary.filter((e) => e.template === activeTemplate)
     : [];
 
+  const loadTodayWorkouts = useCallback(async () => {
+    const rec: DailyRecord = await fetch(`/api/daily?id=${profile.id}&date=${today}`).then((r) => r.json());
+    setTodayWorkouts(rec.workouts ?? []);
+  }, [profile.id, today]);
+
+  useEffect(() => { loadTodayWorkouts(); }, [loadTodayWorkouts]);
+
   async function logStrength(exercise: Exercise, sets: LoggedSet[]): Promise<AutoResult> {
     const entry: WorkoutEntry = {
-      exerciseId: exercise.id,
-      exerciseName: exercise.name,
-      type: "strength",
-      sets,
-      loggedAt: new Date().toISOString(),
+      exerciseId: exercise.id, exerciseName: exercise.name,
+      type: "strength", sets, loggedAt: new Date().toISOString(),
     };
     const res = await fetch(`/api/workout?id=${profile.id}`, {
       method: "POST",
@@ -183,12 +310,8 @@ export default function WorkoutTab({
 
   async function logCardio(exercise: Exercise, durationMin: number, distanceKm: number) {
     const entry: WorkoutEntry = {
-      exerciseId: exercise.id,
-      exerciseName: exercise.name,
-      type: "cardio",
-      durationMin,
-      distanceKm,
-      loggedAt: new Date().toISOString(),
+      exerciseId: exercise.id, exerciseName: exercise.name,
+      type: "cardio", durationMin, distanceKm, loggedAt: new Date().toISOString(),
     };
     await fetch(`/api/workout?id=${profile.id}`, {
       method: "POST",
@@ -206,12 +329,13 @@ export default function WorkoutTab({
       bodyPart: newEx.bodyPart,
       muscleGroup: newEx.muscleGroup,
       targetWeightKg: parseFloat(newEx.targetWeightKg) || 0,
-      targetReps: parseInt(newEx.targetReps) || 8,
+      targetRepsMin: parseInt(newEx.targetRepsMin) || 8,
+      targetRepsMax: parseInt(newEx.targetRepsMax) || 12,
       template: newEx.template || undefined,
     };
     await onProfileUpdate({ ...profile, exerciseLibrary: [...profile.exerciseLibrary, ex] });
     setAddExModal(false);
-    setNewEx({ name: "", muscleGroup: "", bodyPart: "upper", targetWeightKg: "", targetReps: "8", template: "" });
+    setNewEx({ name: "", muscleGroup: "", bodyPart: "upper", targetWeightKg: "", targetRepsMin: "8", targetRepsMax: "12", template: "" });
   }
 
   async function addCardioExercise() {
@@ -229,6 +353,9 @@ export default function WorkoutTab({
   return (
     <div className="flex flex-col gap-4">
       <SectionTitle>Workout</SectionTitle>
+
+      {/* Today's log */}
+      <TodayLog workouts={todayWorkouts} />
 
       {/* Rest timer */}
       <RestTimer />
@@ -257,44 +384,50 @@ export default function WorkoutTab({
       {activeTemplate && (
         <div className="flex flex-col gap-3">
           <div className="font-bold text-sm text-muted uppercase tracking-wider">{activeTemplate}</div>
-          {templateExercises.map((ex) => (
-            <Card key={ex.id}>
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-bold text-sm">{ex.name}</div>
-                  <div className="text-xs text-muted mt-0.5">
-                    Target: {ex.targetWeightKg}kg × {ex.targetReps} reps · {ex.bodyPart}
-                  </div>
-                  {ex.targetWeightKg && ex.targetReps && (
-                    <div className="text-xs text-accent2 mt-0.5">
-                      Est 1RM: {oneRepMax(ex.targetWeightKg, ex.targetReps)}kg
+          {templateExercises.map((ex) => {
+            const rMin = getRepsMin(ex);
+            const rMax = getRepsMax(ex);
+            return (
+              <Card key={ex.id}>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="font-bold text-sm">{ex.name}</div>
+                    <div className="text-xs text-muted mt-0.5">
+                      {ex.targetWeightKg}kg · {rMin}–{rMax} reps · {ex.bodyPart}
                     </div>
-                  )}
+                    {ex.targetWeightKg && (
+                      <div className="text-xs text-accent2 mt-0.5">
+                        Est 1RM @ {rMin} reps: {oneRepMax(ex.targetWeightKg, rMin)}kg
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={() => setExpandedEx(expandedEx === ex.id ? null : ex.id)}
+                      className="text-accent text-xs font-bold bg-accent/10 px-3 py-1.5 rounded-lg">
+                      {expandedEx === ex.id ? "Close" : "Log"}
+                    </button>
+                    <button onClick={() => removeExercise(ex.id)} className="text-muted text-lg px-1">×</button>
+                  </div>
                 </div>
-                <div className="flex gap-1">
-                  <button onClick={() => setExpandedEx(expandedEx === ex.id ? null : ex.id)}
-                    className="text-accent text-xs font-bold bg-accent/10 px-3 py-1.5 rounded-lg">
-                    {expandedEx === ex.id ? "Close" : "Log"}
-                  </button>
-                  <button onClick={() => removeExercise(ex.id)} className="text-muted text-lg px-1">×</button>
-                </div>
-              </div>
-              {expandedEx === ex.id && (
-                <>
-                  <ExerciseHistory exerciseId={ex.id} profileId={profile.id} />
-                  <Divider />
-                  <SetLogger
-                    exercise={ex}
-                    onLog={(sets) => logStrength(ex, sets)}
-                  />
-                </>
-              )}
-            </Card>
-          ))}
+                {expandedEx === ex.id && (
+                  <>
+                    <ExerciseHistory exerciseId={ex.id} profileId={profile.id} />
+                    <Divider />
+                    <SetLogger
+                      exercise={ex}
+                      profileId={profile.id}
+                      onLog={(sets) => logStrength(ex, sets)}
+                      onLogged={loadTodayWorkouts}
+                    />
+                  </>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
 
-      {/* Cardio section */}
+      {/* Cardio */}
       {cardioExercises.length > 0 && (
         <Card>
           <div className="font-bold text-sm mb-3">Cardio</div>
@@ -312,7 +445,11 @@ export default function WorkoutTab({
                   </div>
                 </div>
                 {expandedEx === ex.id && (
-                  <CardioLogger exercise={ex} onLog={(dur, dist) => logCardio(ex, dur, dist)} />
+                  <CardioLogger
+                    exercise={ex}
+                    onLog={(dur, dist) => logCardio(ex, dur, dist)}
+                    onLogged={loadTodayWorkouts}
+                  />
                 )}
               </div>
             ))}
@@ -320,7 +457,7 @@ export default function WorkoutTab({
         </Card>
       )}
 
-      {/* Add exercise buttons */}
+      {/* Add buttons */}
       <div className="grid grid-cols-2 gap-3">
         <Btn variant="secondary" onClick={() => setAddExModal(true)}>+ Strength</Btn>
         <Btn variant="secondary" onClick={() => setAddCardioModal(true)}>+ Cardio</Btn>
@@ -329,19 +466,60 @@ export default function WorkoutTab({
       {/* Add strength modal */}
       <Modal open={addExModal} onClose={() => setAddExModal(false)} title="Add Exercise">
         <div className="flex flex-col gap-3">
-          <Input label="Exercise name" value={newEx.name} onChange={(v) => setNewEx({ ...newEx, name: v })} placeholder="e.g. Bulgarian Split Squat" />
-          <Input label="Muscle group" value={newEx.muscleGroup} onChange={(v) => setNewEx({ ...newEx, muscleGroup: v })} placeholder="e.g. legs" />
+          <Input label="Exercise name" value={newEx.name} onChange={(v) => setNewEx({ ...newEx, name: v })}
+            placeholder="e.g. Bulgarian Split Squat" />
+          <Input label="Muscle group" value={newEx.muscleGroup} onChange={(v) => setNewEx({ ...newEx, muscleGroup: v })}
+            placeholder="e.g. legs" />
           <Select label="Body part" value={newEx.bodyPart}
-            onChange={(v) => setNewEx({ ...newEx, bodyPart: v as "upper"|"lower" })}
-            options={[{ value: "upper", label: "Upper body (+2.5kg)" }, { value: "lower", label: "Lower body (+5kg)" }]} />
+            onChange={(v) => setNewEx({ ...newEx, bodyPart: v as "upper" | "lower" })}
+            options={[{ value: "upper", label: "Upper body (+2.5kg on increase)" }, { value: "lower", label: "Lower body (+5kg on increase)" }]} />
           <Input label="Starting weight" type="number" value={newEx.targetWeightKg}
             onChange={(v) => setNewEx({ ...newEx, targetWeightKg: v })} suffix="kg" step={0.5} min={0} />
-          <Input label="Target reps" type="number" value={newEx.targetReps}
-            onChange={(v) => setNewEx({ ...newEx, targetReps: v })} min={1} max={50} />
-          <Input label="Template (optional)" value={newEx.template}
-            onChange={(v) => setNewEx({ ...newEx, template: v })}
-            placeholder={templates[0] || "e.g. Chest + Triceps"} />
-          <Btn size="lg" onClick={addStrengthExercise} disabled={!newEx.name.trim()}>Add Exercise</Btn>
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Min reps" type="number" value={newEx.targetRepsMin}
+              onChange={(v) => setNewEx({ ...newEx, targetRepsMin: v })} min={1} max={30} />
+            <Input label="Max reps" type="number" value={newEx.targetRepsMax}
+              onChange={(v) => setNewEx({ ...newEx, targetRepsMax: v })} min={1} max={50} />
+          </div>
+
+          {/* Template — mandatory */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted font-semibold uppercase tracking-wider">
+              Template <span className="text-accent">*</span>
+            </label>
+            {templates.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-1">
+                {templates.map((t) => (
+                  <button key={t} type="button"
+                    onClick={() => setNewEx({ ...newEx, template: t })}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      newEx.template === t
+                        ? "bg-accent text-white"
+                        : "bg-surface2 text-muted border border-border"
+                    }`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+            <input
+              value={templates.includes(newEx.template) ? "" : newEx.template}
+              onChange={(e) => setNewEx({ ...newEx, template: e.target.value })}
+              placeholder="Or type a new template name…"
+              className="w-full bg-surface2 border border-border rounded-xl px-4 py-3 text-text text-sm focus:outline-none focus:border-accent transition-colors"
+            />
+            {newEx.template && !templates.includes(newEx.template) && (
+              <div className="text-xs text-success mt-0.5">✓ New template "{newEx.template}" will be created</div>
+            )}
+            {!newEx.template && (
+              <div className="text-xs text-accent mt-0.5">Template is required</div>
+            )}
+          </div>
+
+          <Btn size="lg" onClick={addStrengthExercise}
+            disabled={!newEx.name.trim() || !newEx.template.trim()}>
+            Add Exercise
+          </Btn>
         </div>
       </Modal>
 
@@ -349,7 +527,9 @@ export default function WorkoutTab({
       <Modal open={addCardioModal} onClose={() => setAddCardioModal(false)} title="Add Cardio">
         <Input label="Exercise name" value={newCardio.name}
           onChange={(v) => setNewCardio({ ...newCardio, name: v })} placeholder="e.g. Running, Cycling" />
-        <Btn size="lg" className="mt-4" onClick={addCardioExercise} disabled={!newCardio.name.trim()}>Add Cardio</Btn>
+        <Btn size="lg" className="mt-4" onClick={addCardioExercise} disabled={!newCardio.name.trim()}>
+          Add Cardio
+        </Btn>
       </Modal>
     </div>
   );

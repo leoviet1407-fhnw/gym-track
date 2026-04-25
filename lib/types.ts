@@ -7,22 +7,25 @@ export interface Exercise {
   id: string;
   name: string;
   type: ExerciseType;
-  bodyPart?: BodyPart; // strength only
-  targetWeightKg?: number; // strength only
-  targetReps?: number; // strength only
-  muscleGroup?: string; // free text: "chest", "back", etc.
-  template?: string; // template name, e.g. "Chest + Triceps"
+  bodyPart?: BodyPart;
+  targetWeightKg?: number;
+  targetReps?: number;       // legacy — kept for backward compat
+  targetRepsMin?: number;    // double progression lower bound (default 8)
+  targetRepsMax?: number;    // double progression upper bound (default 12)
+  muscleGroup?: string;
+  template?: string;
 }
 
-export interface Supplement {
-  id: string;
-  name: string;
+// Resolve rep range with defaults
+export function getRepsMin(ex: Exercise): number {
+  return ex.targetRepsMin ?? ex.targetReps ?? 8;
+}
+export function getRepsMax(ex: Exercise): number {
+  return ex.targetRepsMax ?? 12;
 }
 
-export interface Habit {
-  id: string;
-  name: string;
-}
+export interface Supplement { id: string; name: string; }
+export interface Habit { id: string; name: string; }
 
 export interface Profile {
   id: ProfileId;
@@ -36,46 +39,35 @@ export interface Profile {
   exerciseLibrary: Exercise[];
 }
 
-export interface LoggedSet {
-  reps: number;
-  weightKg: number;
-}
+export interface LoggedSet { reps: number; weightKg: number; }
 
 export interface WorkoutEntry {
   exerciseId: string;
   exerciseName: string;
   type: ExerciseType;
-  sets?: LoggedSet[]; // strength
-  durationMin?: number; // cardio
-  distanceKm?: number; // cardio
-  loggedAt: string; // ISO timestamp
+  sets?: LoggedSet[];
+  durationMin?: number;
+  distanceKm?: number;
+  loggedAt: string;
 }
 
 export interface DailyRecord {
-  date: string; // YYYY-MM-DD
+  date: string;
   workouts: WorkoutEntry[];
   supplementsTaken: string[];
   habitsCompleted: string[];
 }
 
-export interface TogetherHabit {
-  id: string;
-  name: string;
-}
+export interface TogetherHabit { id: string; name: string; }
 
 export interface TogetherDaily {
   date: string;
   habits: Array<{ id: string; name: string; completedBy: ProfileId[] }>;
 }
 
-export interface TogetherConfig {
-  habits: TogetherHabit[];
-}
+export interface TogetherConfig { habits: TogetherHabit[]; }
 
-export interface WeightEntry {
-  date: string; // YYYY-MM-DD
-  weightKg: number;
-}
+export interface WeightEntry { date: string; weightKg: number; }
 
 export type PRType = "weight" | "reps" | "1rm";
 export interface PR {
@@ -93,5 +85,4 @@ export interface ChatMessage {
   timestamp: string;
 }
 
-// Alias used in page.tsx
 export type ProfileName = ProfileId;
