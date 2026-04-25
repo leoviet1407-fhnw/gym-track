@@ -9,6 +9,9 @@ interface Stats {
   volumeKg: number;
   habitCompletionPct: number;
   topStreak: number;
+  weightGoalPct: number | null;
+  currentWeight: number;
+  desiredWeight: number | null;
 }
 
 interface CompeteData {
@@ -121,6 +124,38 @@ export default function CompeteTab() {
           </Card2>
         ))}
       </div>
+
+      {/* Weight goal progress */}
+      {(viet.desiredWeight || jullie.desiredWeight) && (
+        <Card>
+          <div className="font-bold text-sm mb-4">Weight Goal Progress</div>
+          <div className="flex flex-col gap-4">
+            {[viet, jullie].map((p) => {
+              if (!p.desiredWeight) return null;
+              const pct = p.weightGoalPct ?? 0;
+              const done = Math.abs(p.currentWeight - p.desiredWeight) < 0.1;
+              return (
+                <div key={p.name}>
+                  <div className="flex justify-between text-xs mb-1.5">
+                    <span className="font-bold text-text">{p.name}</span>
+                    <span className={`font-bold ${done ? "text-success" : "text-accent"}`}>
+                      {done ? "🎯 Goal reached!" : `${pct}%`}
+                    </span>
+                  </div>
+                  <div className="h-2.5 bg-border rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all"
+                      style={{ width: `${pct}%`, background: done ? "#4ade80" : "linear-gradient(90deg,#ff3d3d,#ff7a5a)" }} />
+                  </div>
+                  <div className="flex justify-between text-xs text-muted mt-1">
+                    <span>{p.currentWeight} kg now</span>
+                    <span>Goal: {p.desiredWeight} kg</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

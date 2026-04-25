@@ -23,11 +23,31 @@ export async function GET(req: NextRequest) {
       coupleStreak(),
     ]);
 
+    // Weight goal progress per profile
+    async function weightGoalPct(profile: typeof viet) {
+      if (!profile.desiredWeightKg) return null;
+      const weights = await import("@/lib/storage").then(m => m.getWeights(profile.id));
+      if (!weights.length) return null;
+      const startW = weights[0].weightKg;
+      const currentW = profile.weightKg;
+      const goalW = profile.desiredWeightKg;
+      const isGain = goalW > startW;
+      const totalChange = Math.abs(goalW - startW);
+      if (totalChange === 0) return 100;
+      const progress = isGain ? currentW - startW : startW - currentW;
+      return Math.max(0, Math.min(100, Math.round((progress / totalChange) * 100)));
+    }
+
+    const [vietWeightPct, jullieWeightPct] = await Promise.all([
+      weightGoalPct(viet),
+      weightGoalPct(jullie),
+    ]);
+
     return NextResponse.json({
       weekStart,
       weekEnd,
-      viet: { name: viet.name, ...vietStats },
-      jullie: { name: jullie.name, ...jullieStats },
+      viet: { name: viet.name, ...vietStats, weightGoalPct: vietWeightPct, currentWeight: viet.weightKg, desiredWeight: viet.desiredWeightKg ?? null },
+      jullie: { name: jullie.name, ...jullieStats, weightGoalPct: jullieWeightPct, currentWeight: jullie.weightKg, desiredWeight: jullie.desiredWeightKg ?? null },
       coupleStreak: couple,
     });
   } catch (err) {

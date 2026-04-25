@@ -282,8 +282,12 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
               onChange={(v) => setForm({ ...form, age: parseInt(v) || 0 })} suffix="yrs" />
             <Input label="Height" type="number" value={form.heightCm} min={100} max={250}
               onChange={(v) => setForm({ ...form, heightCm: parseInt(v) || 0 })} suffix="cm" />
-            <Input label="Weight" type="number" value={form.weightKg} min={20} max={300} step={0.1}
-              onChange={(v) => setForm({ ...form, weightKg: parseFloat(v) || 0 })} suffix="kg" />
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Weight" type="number" value={form.weightKg} min={20} max={300} step={0.1}
+                onChange={(v) => setForm({ ...form, weightKg: parseFloat(v) || 0 })} suffix="kg" />
+              <Input label="Goal Weight" type="number" value={form.desiredWeightKg ?? ""} min={20} max={300} step={0.1}
+                onChange={(v) => setForm({ ...form, desiredWeightKg: parseFloat(v) || undefined })} suffix="kg" />
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-y-3 text-sm">
@@ -293,6 +297,7 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
               ["Age", `${form.age} yrs`],
               ["Height", `${form.heightCm} cm`],
               ["Weight", `${form.weightKg} kg`],
+              ["Goal Weight", form.desiredWeightKg ? `${form.desiredWeightKg} kg` : "—"],
             ].map(([k, v]) => (
               <div key={k}>
                 <div className="text-muted text-xs">{k}</div>
@@ -302,6 +307,40 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
           </div>
         )}
       </Card>
+
+      {/* Weight goal progress bar */}
+      {profile.desiredWeightKg && weights.length > 0 && (() => {
+        const startW = weights[0].weightKg;
+        const currentW = profile.weightKg;
+        const goalW = profile.desiredWeightKg!;
+        const isGain = goalW > startW;
+        const totalChange = Math.abs(goalW - startW);
+        const progress = isGain ? currentW - startW : startW - currentW;
+        const pct = totalChange > 0 ? Math.max(0, Math.min(100, (progress / totalChange) * 100)) : 0;
+        const remaining = Math.abs(currentW - goalW);
+        const done = remaining < 0.1;
+        return (
+          <Card>
+            <div className="font-bold text-sm mb-3">Weight Goal</div>
+            <div className="flex justify-between text-xs text-muted mb-2">
+              <span>Start <span className="text-text font-bold">{startW} kg</span></span>
+              <span className="text-accent font-bold">{Math.round(pct)}%</span>
+              <span>Goal <span className="text-text font-bold">{goalW} kg</span></span>
+            </div>
+            <div className="h-3 bg-border rounded-full overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${pct}%`, background: done ? "#4ade80" : "linear-gradient(90deg,#ff3d3d,#ff7a5a)" }} />
+            </div>
+            <div className="flex justify-between text-xs mt-2">
+              <span className="text-muted">Current: <span className="text-text font-bold">{currentW} kg</span></span>
+              {done
+                ? <span className="text-success font-bold">🎯 Goal reached!</span>
+                : <span className="text-muted">{remaining.toFixed(1)} kg to go</span>
+              }
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Weight log */}
       <Card>

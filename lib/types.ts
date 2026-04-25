@@ -34,6 +34,7 @@ export interface Profile {
   age: number;
   heightCm: number;
   weightKg: number;
+  desiredWeightKg?: number;
   supplements: Supplement[];
   personalHabits: Habit[];
   exerciseLibrary: Exercise[];
