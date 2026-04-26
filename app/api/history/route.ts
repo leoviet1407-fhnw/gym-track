@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listDailyDates, getDaily, getPRs } from "@/lib/storage";
+import { getDaily, getPRs } from "@/lib/storage";
+import { sql, ensureSchema } from "@/lib/db";
 import { oneRepMax } from "@/lib/fitness";
 import type { ProfileId } from "@/lib/types";
 
@@ -7,23 +8,23 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function pid(req: NextRequest): ProfileId {
-  const id = req.nextUrl.searchParams.get("id");
-  return id === "jullie" ? "jullie" : "viet";
+  return req.nextUrl.searchParams.get("id") === "jullie" ? "jullie" : "viet";
 }
 
 export async function GET(req: NextRequest) {
   const id = pid(req);
   const mode = req.nextUrl.searchParams.get("mode");
+  await ensureSchema();
 
-  // List all dates that have workouts
+  // List all dates that have workouts — single SQL query
   if (mode === "dates") {
-    const allDates = await listDailyDates(id);
-    const withWorkouts: string[] = [];
-    for (const date of [...allDates].reverse()) {
-      const rec = await getDaily(id, date);
-      if (rec.workouts.length > 0) withWorkouts.push(date);
-    }
-    return NextResponse.json({ dates: withWorkouts });
+    const { rows } = await sql`
+      SELECT date, data FROM daily_records
+      WHERE profile_id = ${id}
+        AND jsonb_array_length(data->'workouts') > 0
+      ORDER BY date DESC
+    `;
+    return NextResponse.json({ dates: rows.map((r) => r.date as string) });
   }
 
   // Get full record for a specific date
@@ -34,18 +35,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(rec);
   }
 
-  // Get all sessions for a specific exercise
+  // Get all sessions for a specific exercise — single SQL query
   if (mode === "exercise") {
     const exerciseId = req.nextUrl.searchParams.get("exerciseId");
     if (!exerciseId) return NextResponse.json({ sessions: [] });
-    const allDates = await listDailyDates(id);
+
+    const { rows } = await sql`
+      SELECT date, data FROM daily_records
+      WHERE profile_id = ${id}
+        AND jsonb_array_length(data->'workouts') > 0
+      ORDER BY date DESC
+    `;
+
     const sessions: Array<{ date: string; sets: Array<{ reps: number; weightKg: number }>; oneRM: number }> = [];
-    for (const date of [...allDates].reverse()) {
-      const rec = await getDaily(id, date);
+    for (const row of rows) {
+      const rec = row.data as { workouts: Array<{ exerciseId: string; sets?: Array<{ reps: number; weightKg: number }> }> };
       const entry = rec.workouts.find((w) => w.exerciseId === exerciseId);
       if (entry?.sets?.length) {
         const maxRM = Math.max(...entry.sets.map((s) => oneRepMax(s.weightKg, s.reps)));
-        sessions.push({ date, sets: entry.sets, oneRM: maxRM });
+        sessions.push({ date: row.date, sets: entry.sets, oneRM: maxRM });
       }
     }
     return NextResponse.json({ sessions });
