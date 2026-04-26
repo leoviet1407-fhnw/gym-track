@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDaily, getPRs } from "@/lib/storage";
 import { sql, ensureSchema } from "@/lib/db";
 import { oneRepMax } from "@/lib/fitness";
-import type { ProfileId } from "@/lib/types";
+import type { ProfileId, DailyRecord, WorkoutEntry } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,15 +16,20 @@ export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get("mode");
   await ensureSchema();
 
-  // List all dates that have workouts — single SQL query
+  // List all dates that have workouts
   if (mode === "dates") {
     const { rows } = await sql`
       SELECT date, data FROM daily_records
       WHERE profile_id = ${id}
-        AND jsonb_array_length(data->'workouts') > 0
       ORDER BY date DESC
     `;
-    return NextResponse.json({ dates: rows.map((r) => r.date as string) });
+    const withWorkouts = rows
+      .filter((r) => {
+        const rec = r.data as DailyRecord;
+        return Array.isArray(rec.workouts) && rec.workouts.length > 0;
+      })
+      .map((r) => r.date as string);
+    return NextResponse.json({ dates: withWorkouts });
   }
 
   // Get full record for a specific date
@@ -35,7 +40,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(rec);
   }
 
-  // Get all sessions for a specific exercise — single SQL query
+  // Get all sessions for a specific exercise (strength or cardio)
   if (mode === "exercise") {
     const exerciseId = req.nextUrl.searchParams.get("exerciseId");
     if (!exerciseId) return NextResponse.json({ sessions: [] });
@@ -43,17 +48,28 @@ export async function GET(req: NextRequest) {
     const { rows } = await sql`
       SELECT date, data FROM daily_records
       WHERE profile_id = ${id}
-        AND jsonb_array_length(data->'workouts') > 0
       ORDER BY date DESC
     `;
 
-    const sessions: Array<{ date: string; sets: Array<{ reps: number; weightKg: number }>; oneRM: number }> = [];
+    const sessions: Array<{
+      date: string;
+      type: string;
+      sets?: Array<{ reps: number; weightKg: number }>;
+      oneRM?: number;
+      durationMin?: number;
+      distanceKm?: number;
+    }> = [];
+
     for (const row of rows) {
-      const rec = row.data as { workouts: Array<{ exerciseId: string; sets?: Array<{ reps: number; weightKg: number }> }> };
-      const entry = rec.workouts.find((w) => w.exerciseId === exerciseId);
-      if (entry?.sets?.length) {
+      const rec = row.data as DailyRecord;
+      if (!Array.isArray(rec.workouts)) continue;
+      const entry = rec.workouts.find((w: WorkoutEntry) => w.exerciseId === exerciseId);
+      if (!entry) continue;
+      if (entry.type === "strength" && entry.sets?.length) {
         const maxRM = Math.max(...entry.sets.map((s) => oneRepMax(s.weightKg, s.reps)));
-        sessions.push({ date: row.date, sets: entry.sets, oneRM: maxRM });
+        sessions.push({ date: row.date, type: "strength", sets: entry.sets, oneRM: maxRM });
+      } else if (entry.type === "cardio" && (entry.durationMin || entry.distanceKm)) {
+        sessions.push({ date: row.date, type: "cardio", durationMin: entry.durationMin, distanceKm: entry.distanceKm });
       }
     }
     return NextResponse.json({ sessions });

@@ -177,9 +177,18 @@ function HistoryByDate({ profileId }: { profileId: string }) {
 }
 
 // ── History by exercise ───────────────────────────────────────────────────────
+interface SessionEntry {
+  date: string;
+  type: string;
+  sets?: Array<{ reps: number; weightKg: number }>;
+  oneRM?: number;
+  durationMin?: number;
+  distanceKm?: number;
+}
+
 function HistoryByExercise({ profileId, exercises }: { profileId: string; exercises: Profile["exerciseLibrary"] }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<Array<{ date: string; sets: Array<{ reps: number; weightKg: number }>; oneRM: number }>>([]);
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
   async function selectExercise(id: string) {
@@ -191,29 +200,31 @@ function HistoryByExercise({ profileId, exercises }: { profileId: string; exerci
     setLoading(false);
   }
 
-  const strengthEx = exercises.filter((e) => e.type === "strength");
-  if (!strengthEx.length) return <div className="text-muted text-sm text-center py-6">No exercises in library yet</div>;
+  if (!exercises.length) return <div className="text-muted text-sm text-center py-6">No exercises in library yet</div>;
 
   return (
     <div className="flex flex-col gap-2">
-      {strengthEx.map((ex) => (
+      {exercises.map((ex) => (
         <div key={ex.id}>
           <button onClick={() => selectExercise(ex.id)}
             className={`w-full text-left px-4 py-3 rounded-xl font-semibold text-sm transition-all flex justify-between items-center ${
               selectedId === ex.id ? "bg-accent text-white" : "bg-surface2 text-text border border-border"
             }`}>
             <span>{ex.name}</span>
-            <span className="text-xs opacity-70">{selectedId === ex.id ? "▲" : "▼"}</span>
+            <div className="flex items-center gap-2">
+              {ex.type === "cardio" && <span className="text-xs text-muted">cardio</span>}
+              <span className="text-xs opacity-70">{selectedId === ex.id ? "▲" : "▼"}</span>
+            </div>
           </button>
           {selectedId === ex.id && (
             <div className="mt-1 pl-2">
               {loading ? <Spinner /> : sessions.length === 0 ? (
                 <div className="text-muted text-xs px-3 py-2">No sessions logged yet</div>
-              ) : (
+              ) : ex.type === "strength" ? (
                 <>
                   {sessions.length > 1 && (
                     <ResponsiveContainer width="100%" height={100}>
-                      <LineChart data={sessions.map((s) => ({ label: formatShort(s.date), rm: s.oneRM })).reverse()}>
+                      <LineChart data={sessions.map((s) => ({ label: formatShort(s.date), rm: s.oneRM ?? 0 })).reverse()}>
                         <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#8a8a92" }} />
                         <YAxis domain={["auto", "auto"]} tick={{ fontSize: 9, fill: "#8a8a92" }} width={28} />
                         <Tooltip contentStyle={{ background: "#141417", border: "1px solid #2a2a2f", borderRadius: 8, fontSize: 11 }}
@@ -226,8 +237,31 @@ function HistoryByExercise({ profileId, exercises }: { profileId: string; exerci
                     {sessions.slice(0, 8).map((s, i) => (
                       <div key={i} className="bg-surface rounded-xl px-3 py-1.5 flex justify-between text-xs">
                         <span className="text-muted">{formatDate(s.date)}</span>
-                        <span className="text-text">{s.sets.map((x) => `${x.reps}x${x.weightKg}kg`).join(", ")}</span>
+                        <span className="text-text">{s.sets?.map((x) => `${x.reps}x${x.weightKg}kg`).join(", ")}</span>
                         <span className="text-accent2">1RM~{s.oneRM}kg</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {sessions.length > 1 && (
+                    <ResponsiveContainer width="100%" height={100}>
+                      <LineChart data={sessions.map((s) => ({ label: formatShort(s.date), km: s.distanceKm ?? 0, min: s.durationMin ?? 0 })).reverse()}>
+                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#8a8a92" }} />
+                        <YAxis domain={["auto", "auto"]} tick={{ fontSize: 9, fill: "#8a8a92" }} width={28} />
+                        <Tooltip contentStyle={{ background: "#141417", border: "1px solid #2a2a2f", borderRadius: 8, fontSize: 11 }}
+                          itemStyle={{ color: "#4ade80" }} />
+                        <Line type="monotone" dataKey="km" stroke="#4ade80" strokeWidth={1.5} dot={false} name="km" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                  <div className="flex flex-col gap-1 mt-1">
+                    {sessions.slice(0, 8).map((s, i) => (
+                      <div key={i} className="bg-surface rounded-xl px-3 py-1.5 flex justify-between text-xs">
+                        <span className="text-muted">{formatDate(s.date)}</span>
+                        {s.durationMin ? <span className="text-text">{s.durationMin} min</span> : null}
+                        {s.distanceKm ? <span className="text-success">{s.distanceKm} km</span> : null}
                       </div>
                     ))}
                   </div>
