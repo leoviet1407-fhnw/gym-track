@@ -96,3 +96,34 @@ All resets and calculations use **Europe/Zurich** (CET/CEST).
 ## Stats route missing?
 
 If `/api/stats` returns 404, make sure `app/api/stats/route.ts` exists. It was included in the project — check your deployment logs.
+
+---
+
+## Migrating from Blob to Postgres (faster app)
+
+### Why migrate?
+Vercel Blob is object storage — every read/write takes 300–800ms. Postgres is a proper database — operations take under 50ms. The app feels significantly faster after migration.
+
+### Step 1 — Create Postgres database on Vercel
+1. Go to your Vercel project → **Storage** → **Create Database** → **Postgres (Neon)**
+2. Name it anything (e.g. `gymtrack-db`)
+3. Click **Connect Project** — this auto-adds `POSTGRES_URL` and related env vars
+
+### Step 2 — Redeploy
+Push your updated code to GitHub. Vercel will auto-deploy.
+
+### Step 3 — Run the migration
+Open this URL in your browser (replace with your actual domain):
+```
+https://your-app.vercel.app/api/migrate?secret=YOUR_CRON_SECRET
+```
+You'll see a JSON response listing everything migrated. Takes 10–30 seconds.
+
+### Step 4 — Verify
+Open the app and check your data is all there. Your Blob store is untouched and stays as a backup.
+
+### Env vars after migration
+You need both:
+- `BLOB_READ_WRITE_TOKEN` — still needed for the migration endpoint to read from Blob
+- `POSTGRES_URL` — added automatically when you connected Postgres
+- `POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING` — also added automatically, used by @vercel/postgres
