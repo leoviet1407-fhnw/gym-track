@@ -225,7 +225,11 @@ function CardioLogger({ exercise, onLog, onLogged }: {
 }
 
 // ── Today's log ──────────────────────────────────────────────────────────────
-function TodayLog({ workouts }: { workouts: WorkoutEntry[] }) {
+function TodayLog({ workouts, onDelete, onEdit }: {
+  workouts: WorkoutEntry[];
+  onDelete: (loggedAt: string) => void;
+  onEdit: (entry: WorkoutEntry) => void;
+}) {
   if (!workouts.length) return null;
   return (
     <Card className="border border-success/30 bg-success/5">
@@ -237,9 +241,17 @@ function TodayLog({ workouts }: { workouts: WorkoutEntry[] }) {
       <div className="flex flex-col gap-2">
         {workouts.map((w, i) => (
           <div key={i} className="bg-surface2 rounded-xl px-3 py-2">
-            <div className="font-semibold text-sm">{w.exerciseName}</div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="font-semibold text-sm">{w.exerciseName}</div>
+              <div className="flex gap-1">
+                <button onClick={() => onEdit(w)}
+                  className="text-muted text-xs bg-surface px-2 py-1 rounded-lg border border-border">✏️</button>
+                <button onClick={() => onDelete(w.loggedAt)}
+                  className="text-accent text-xs bg-surface px-2 py-1 rounded-lg border border-border">🗑️</button>
+              </div>
+            </div>
             {w.type === "strength" && w.sets?.length ? (
-              <div className="text-xs text-muted mt-1 flex flex-wrap gap-1">
+              <div className="text-xs text-muted flex flex-wrap gap-1">
                 {w.sets.map((s, j) => (
                   <span key={j} className="bg-surface px-2 py-0.5 rounded-full">{s.reps}×{s.weightKg}kg</span>
                 ))}
@@ -248,7 +260,7 @@ function TodayLog({ workouts }: { workouts: WorkoutEntry[] }) {
                 </span>
               </div>
             ) : (
-              <div className="text-xs text-muted mt-1">
+              <div className="text-xs text-muted">
                 {w.durationMin ? `${w.durationMin} min` : ""}
                 {w.distanceKm ? ` · ${w.distanceKm} km` : ""}
               </div>
@@ -286,6 +298,12 @@ export default function WorkoutTab({
   const [editEx, setEditEx] = useState({ name: "", muscleGroup: "", bodyPart: "upper" as "upper"|"lower", targetWeightKg: "", targetRepsMin: "8", targetRepsMax: "12", template: "" });
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState<string | null>(null);
   const [confirmDeleteEx, setConfirmDeleteEx] = useState<string | null>(null);
+  const [confirmDeleteLog, setConfirmDeleteLog] = useState<string | null>(null);
+  const [editLogModal, setEditLogModal] = useState(false);
+  const [editingLog, setEditingLog] = useState<WorkoutEntry | null>(null);
+  const [editLogSets, setEditLogSets] = useState<LoggedSet[]>([]);
+  const [editLogDuration, setEditLogDuration] = useState("");
+  const [editLogDistance, setEditLogDistance] = useState("");
   const today = todayISO();
 
   const templates = Array.from(new Set(
@@ -302,6 +320,47 @@ export default function WorkoutTab({
   }, [profile.id, today]);
 
   useEffect(() => { loadTodayWorkouts(); }, [loadTodayWorkouts]);
+
+  async function deleteLogEntry(loggedAt: string) {
+    await fetch(`/api/workout?id=${profile.id}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ date: today, loggedAt }),
+    });
+    setConfirmDeleteLog(null);
+    loadTodayWorkouts();
+  }
+
+  function openEditLog(entry: WorkoutEntry) {
+    setEditingLog(entry);
+    setEditLogSets(entry.sets ? entry.sets.map((s) => ({ ...s })) : []);
+    setEditLogDuration(entry.durationMin ? String(entry.durationMin) : "");
+    setEditLogDistance(entry.distanceKm ? String(entry.distanceKm) : "");
+    setEditLogModal(true);
+  }
+
+  async function saveEditLog() {
+    if (!editingLog) return;
+    const rec: DailyRecord = await fetch(`/api/daily?id=${profile.id}&date=${today}`).then((r) => r.json());
+    rec.workouts = rec.workouts.map((w) =>
+      w.loggedAt === editingLog.loggedAt
+        ? {
+            ...w,
+            sets: editingLog.type === "strength" ? editLogSets : undefined,
+            durationMin: editingLog.type === "cardio" ? parseFloat(editLogDuration) || 0 : undefined,
+            distanceKm: editingLog.type === "cardio" ? parseFloat(editLogDistance) || 0 : undefined,
+          }
+        : w
+    );
+    await fetch(`/api/daily?id=${profile.id}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(rec),
+    });
+    setEditLogModal(false);
+    setEditingLog(null);
+    loadTodayWorkouts();
+  }
 
   async function logStrength(exercise: Exercise, sets: LoggedSet[]): Promise<AutoResult> {
     const entry: WorkoutEntry = {
@@ -401,7 +460,11 @@ export default function WorkoutTab({
       <SectionTitle>Workout</SectionTitle>
 
       {/* Today's log */}
-      <TodayLog workouts={todayWorkouts} />
+      <TodayLog
+        workouts={todayWorkouts}
+        onDelete={(loggedAt) => setConfirmDeleteLog(loggedAt)}
+        onEdit={openEditLog}
+      />
 
       {/* Rest timer */}
       <RestTimer />
@@ -646,6 +709,53 @@ export default function WorkoutTab({
           <Btn variant="secondary" onClick={() => setConfirmDeleteEx(null)} className="flex-1">Cancel</Btn>
           <Btn variant="danger" onClick={() => removeExercise(confirmDeleteEx!)} className="flex-1">Delete</Btn>
         </div>
+      </Modal>
+
+      {/* Delete logged entry confirm */}
+      <Modal open={!!confirmDeleteLog} onClose={() => setConfirmDeleteLog(null)} title="Delete Log Entry">
+        <div className="text-sm text-muted mb-4">Remove this entry from today's log? This cannot be undone.</div>
+        <div className="flex gap-3">
+          <Btn variant="secondary" onClick={() => setConfirmDeleteLog(null)} className="flex-1">Cancel</Btn>
+          <Btn variant="danger" onClick={() => deleteLogEntry(confirmDeleteLog!)} className="flex-1">Delete</Btn>
+        </div>
+      </Modal>
+
+      {/* Edit logged entry modal */}
+      <Modal open={editLogModal} onClose={() => setEditLogModal(false)} title={`Edit: ${editingLog?.exerciseName ?? ""}`}>
+        {editingLog?.type === "strength" ? (
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-12 gap-1 text-xs text-muted px-1 mb-1">
+              <div className="col-span-1">#</div>
+              <div className="col-span-5">Weight (kg)</div>
+              <div className="col-span-5">Reps</div>
+              <div className="col-span-1" />
+            </div>
+            {editLogSets.map((s, i) => (
+              <div key={i} className="grid grid-cols-12 gap-1 items-center">
+                <div className="col-span-1 text-xs text-muted text-center">{i + 1}</div>
+                <input type="number" value={s.weightKg} step="0.5" min="0"
+                  onChange={(e) => setEditLogSets((prev) => prev.map((x, idx) => idx === i ? { ...x, weightKg: parseFloat(e.target.value) || 0 } : x))}
+                  className="col-span-5 bg-surface2 border border-border rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-accent" />
+                <input type="number" value={s.reps} min="1"
+                  onChange={(e) => setEditLogSets((prev) => prev.map((x, idx) => idx === i ? { ...x, reps: parseInt(e.target.value) || 0 } : x))}
+                  className="col-span-5 bg-surface2 border border-border rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-accent" />
+                <button onClick={() => setEditLogSets((prev) => prev.filter((_, idx) => idx !== i))}
+                  className="col-span-1 text-muted text-sm">×</button>
+              </div>
+            ))}
+            <Btn size="sm" variant="secondary"
+              onClick={() => setEditLogSets((prev) => [...prev, { reps: 8, weightKg: editLogSets[editLogSets.length - 1]?.weightKg ?? 0 }])}>
+              + Set
+            </Btn>
+            <Btn size="lg" onClick={saveEditLog}>Save Changes</Btn>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <Input label="Duration" type="number" value={editLogDuration} onChange={setEditLogDuration} suffix="min" />
+            <Input label="Distance" type="number" value={editLogDistance} onChange={setEditLogDistance} suffix="km" />
+            <Btn size="lg" onClick={saveEditLog}>Save Changes</Btn>
+          </div>
+        )}
       </Modal>
     </div>
   );
