@@ -7,7 +7,7 @@ import { Card, Card2, Btn, Input, Select, SectionTitle, Divider, Spinner, Modal 
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 // ── History by date ──────────────────────────────────────────────────────────
-function HistoryByDate({ profileId }: { profileId: string }) {
+function HistoryByDate({ profileId, refreshKey }: { profileId: string; refreshKey: number }) {
   const [dates, setDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [record, setRecord] = useState<DailyRecord | null>(null);
@@ -20,12 +20,13 @@ function HistoryByDate({ profileId }: { profileId: string }) {
   const [editDistance, setEditDistance] = useState("");
 
   function loadDates() {
-    fetch(`/api/history?id=${profileId}&mode=dates`)
+    setLoading(true);
+    fetch(`/api/history?id=${profileId}&mode=dates`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => { setDates(d.dates ?? []); setLoading(false); });
   }
 
-  useEffect(() => { loadDates(); }, [profileId]);
+  useEffect(() => { loadDates(); }, [profileId, refreshKey]);
 
   async function selectDate(date: string) {
     if (selectedDate === date) { setSelectedDate(null); setRecord(null); return; }
@@ -316,6 +317,7 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
   const [newWeight, setNewWeight] = useState("");
   const [loadingWeights, setLoadingWeights] = useState(true);
   const [historyTab, setHistoryTab] = useState<"date" | "exercise">("date");
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => { setForm(profile); }, [profile]);
 
@@ -502,7 +504,7 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
         <div className="font-bold text-sm mb-3">Workout History</div>
         <div className="flex gap-2 mb-4">
           {(["date", "exercise"] as const).map((t) => (
-            <button key={t} onClick={() => setHistoryTab(t)}
+            <button key={t} onClick={() => { setHistoryTab(t); if (t === "date") setHistoryRefreshKey((k) => k + 1); }}
               className={`flex-1 py-2 rounded-xl text-xs font-bold capitalize transition-all ${
                 historyTab === t ? "bg-accent text-white" : "bg-surface2 text-muted border border-border"
               }`}>
@@ -510,7 +512,7 @@ export default function ProfileTab({ profile, onSave }: { profile: Profile; onSa
             </button>
           ))}
         </div>
-        {historyTab === "date" && <HistoryByDate profileId={profile.id} />}
+        {historyTab === "date" && <HistoryByDate profileId={profile.id} refreshKey={historyRefreshKey} />}
         {historyTab === "exercise" && <HistoryByExercise profileId={profile.id} exercises={profile.exerciseLibrary} />}
       </Card>
 

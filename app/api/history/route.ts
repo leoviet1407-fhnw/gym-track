@@ -6,6 +6,10 @@ import type { ProfileId, DailyRecord, WorkoutEntry } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
+const NO_CACHE = { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } };
 
 function pid(req: NextRequest): ProfileId {
   return req.nextUrl.searchParams.get("id") === "jullie" ? "jullie" : "viet";
@@ -29,7 +33,7 @@ export async function GET(req: NextRequest) {
         return Array.isArray(rec.workouts) && rec.workouts.length > 0;
       })
       .map((r) => r.date as string);
-    return NextResponse.json({ dates: withWorkouts });
+    return NextResponse.json({ dates: withWorkouts }, NO_CACHE);
   }
 
   // Get full record for a specific date
@@ -37,13 +41,13 @@ export async function GET(req: NextRequest) {
     const date = req.nextUrl.searchParams.get("date");
     if (!date) return NextResponse.json({ error: "missing date" }, { status: 400 });
     const rec = await getDaily(id, date);
-    return NextResponse.json(rec);
+    return NextResponse.json(rec, NO_CACHE);
   }
 
-  // Get all sessions for a specific exercise (strength or cardio)
+  // Get all sessions for a specific exercise
   if (mode === "exercise") {
     const exerciseId = req.nextUrl.searchParams.get("exerciseId");
-    if (!exerciseId) return NextResponse.json({ sessions: [] });
+    if (!exerciseId) return NextResponse.json({ sessions: [] }, NO_CACHE);
 
     const { rows } = await sql`
       SELECT date, data FROM daily_records
@@ -72,13 +76,13 @@ export async function GET(req: NextRequest) {
         sessions.push({ date: row.date, type: "cardio", durationMin: entry.durationMin, distanceKm: entry.distanceKm });
       }
     }
-    return NextResponse.json({ sessions });
+    return NextResponse.json({ sessions }, NO_CACHE);
   }
 
   // Get all PRs
   if (mode === "prs") {
     const prs = await getPRs(id);
-    return NextResponse.json({ prs: [...prs].reverse() });
+    return NextResponse.json({ prs: [...prs].reverse() }, NO_CACHE);
   }
 
   return NextResponse.json({ error: "invalid mode" }, { status: 400 });
