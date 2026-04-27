@@ -22,7 +22,7 @@ interface AutoResult { prs: PRResult[]; progression: ProgressionResult | null; d
 function ExerciseHistory({ exerciseId, profileId }: { exerciseId: string; profileId: string }) {
   const [history, setHistory] = useState<Array<{ date: string; entry: WorkoutEntry }>>([]);
   useEffect(() => {
-    fetch(`/api/workout?id=${profileId}&exerciseId=${exerciseId}`)
+    fetch(`/api/workout?id=${profileId}&exerciseId=${exerciseId}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setHistory(d.history ?? []));
   }, [exerciseId, profileId]);
@@ -315,7 +315,7 @@ export default function WorkoutTab({
     : [];
 
   const loadTodayWorkouts = useCallback(async () => {
-    const rec: DailyRecord = await fetch(`/api/daily?id=${profile.id}&date=${today}`).then((r) => r.json());
+    const rec: DailyRecord = await fetch(`/api/daily?id=${profile.id}&date=${today}`, { cache: "no-store" }).then((r) => r.json());
     setTodayWorkouts(rec.workouts ?? []);
   }, [profile.id, today]);
 
@@ -341,7 +341,7 @@ export default function WorkoutTab({
 
   async function saveEditLog() {
     if (!editingLog) return;
-    const rec: DailyRecord = await fetch(`/api/daily?id=${profile.id}&date=${today}`).then((r) => r.json());
+    const rec: DailyRecord = await fetch(`/api/daily?id=${profile.id}&date=${today}`, { cache: "no-store" }).then((r) => r.json());
     rec.workouts = rec.workouts.map((w) =>
       w.loggedAt === editingLog.loggedAt
         ? {

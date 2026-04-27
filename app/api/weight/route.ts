@@ -4,6 +4,8 @@ import type { ProfileId, WeightEntry } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
 
 function pid(req: NextRequest): ProfileId {
   return req.nextUrl.searchParams.get("id") === "jullie" ? "jullie" : "viet";

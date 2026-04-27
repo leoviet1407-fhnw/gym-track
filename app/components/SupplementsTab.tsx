@@ -17,7 +17,7 @@ export default function SupplementsTab({
   const today = todayISO();
 
   useEffect(() => {
-    fetch(`/api/daily?id=${profile.id}&date=${today}`)
+    fetch(`/api/daily?id=${profile.id}&date=${today}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => { setTaken(d.supplementsTaken ?? []); setLoading(false); });
   }, [profile.id, today]);
@@ -25,7 +25,7 @@ export default function SupplementsTab({
   async function toggle(id: string) {
     const updated = taken.includes(id) ? taken.filter((t) => t !== id) : [...taken, id];
     setTaken(updated);
-    const rec = await fetch(`/api/daily?id=${profile.id}&date=${today}`).then((r) => r.json());
+    const rec = await fetch(`/api/daily?id=${profile.id}&date=${today}`, { cache: "no-store" }).then((r) => r.json());
     await fetch(`/api/daily?id=${profile.id}`, {
       method: "POST",
       headers: { "content-type": "application/json" },

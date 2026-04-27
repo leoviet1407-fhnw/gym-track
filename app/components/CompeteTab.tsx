@@ -47,7 +47,8 @@ export default function CompeteTab() {
   const weekStart = weekStartISO(today);
 
   useEffect(() => {
-    fetch(`/api/stats?weekStart=${weekStart}`)
+    setLoading(true);
+    fetch(`/api/stats?weekStart=${weekStart}&t=${Date.now()}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => { setData(d); setLoading(false); });
   }, [weekStart]);

@@ -24,9 +24,9 @@ export default function HabitsTab({
 
   const load = useCallback(async () => {
     const [daily, tog, statsRes] = await Promise.all([
-      fetch(`/api/daily?id=${profile.id}&date=${today}`).then((r) => r.json()),
-      fetch(`/api/together?date=${today}`).then((r) => r.json()),
-      fetch(`/api/stats`).then((r) => r.json()),
+      fetch(`/api/daily?id=${profile.id}&date=${today}`, { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/together?date=${today}`, { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/stats`, { cache: "no-store" }).then((r) => r.json()),
     ]);
     setCompleted(daily.habitsCompleted ?? []);
     setTogether(tog);
@@ -48,7 +48,7 @@ export default function HabitsTab({
   async function togglePersonal(id: string) {
     const updated = completed.includes(id) ? completed.filter((c) => c !== id) : [...completed, id];
     setCompleted(updated);
-    const rec = await fetch(`/api/daily?id=${profile.id}&date=${today}`).then((r) => r.json());
+    const rec = await fetch(`/api/daily?id=${profile.id}&date=${today}`, { cache: "no-store" }).then((r) => r.json());
     await fetch(`/api/daily?id=${profile.id}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -80,7 +80,7 @@ export default function HabitsTab({
 
   async function addTogetherHabit() {
     if (!newHabit.trim()) return;
-    const cfg = await fetch(`/api/together?scope=config`).then((r) => r.json());
+    const cfg = await fetch(`/api/together?scope=config`, { cache: "no-store" }).then((r) => r.json());
     const h = { id: `tog-${Date.now()}`, name: newHabit.trim() };
     await fetch(`/api/together?scope=config`, {
       method: "POST",
@@ -93,7 +93,7 @@ export default function HabitsTab({
   }
 
   async function removeTogetherHabit(id: string) {
-    const cfg = await fetch(`/api/together?scope=config`).then((r) => r.json());
+    const cfg = await fetch(`/api/together?scope=config`, { cache: "no-store" }).then((r) => r.json());
     await fetch(`/api/together?scope=config`, {
       method: "POST",
       headers: { "content-type": "application/json" },

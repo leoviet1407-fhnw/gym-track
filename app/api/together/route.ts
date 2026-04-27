@@ -10,6 +10,8 @@ import type { ProfileId, TogetherConfig, TogetherDaily } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   const scope = req.nextUrl.searchParams.get("scope"); // "config" | "daily"
